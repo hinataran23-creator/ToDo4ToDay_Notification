@@ -1,0 +1,162 @@
+name: Build ToDo4ToDay APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'source.zip'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Extract source
+        run: |
+          test -f source.zip
+          mkdir -p app
+          unzip -o source.zip -d app
+
+      - name: Generate Android project
+        working-directory: app
+        run: |
+          flutter create . \
+            --project-name todo4today \
+            --org com.rtna.todo4today \
+            --platforms=android
+
+      - name: Configure Android notifications and desugaring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path("app/android/app/src/main/AndroidManifest.xml")
+          xml = manifest.read_text()
+
+          permissions = [
+              "android.permission.RECEIVE_BOOT_COMPLETED",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.SCHEDULE_EXACT_ALARM",
+          ]
+          for permission in permissions:
+              entry = f'<uses-permission android:name="{permission}"/>'
+              if permission not in xml:
+                  xml = re.sub(r'(<manifest\b[^>]*>)',
+                               r'\1\n    ' + entry, xml, count=1)
+
+          receivers = '''
+              <receiver
+                  android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+                  android:exported="false" />
+              <receiver
+                  android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+                  android:exported="false">
+                  <intent-filter>
+                      <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                      <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                      <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                      <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+                  </intent-filter>
+              </receiver>
+          '''
+          if "ScheduledNotificationReceiver" not in xml:
+              xml = xml.replace("</application>", receivers + "\n</application>")
+          manifest.write_text(xml)
+
+          gradle = Path("app/android/app/build.gradle.kts")
+          is_kts = gradle.exists()
+          if not is_kts:
+              gradle = Path("app/android/app/build.gradle")
+          if not gradle.exists():
+              raise SystemExit("Fichier Gradle Android introuvable")
+
+          text = gradle.read_text()
+          if "isCoreLibraryDesugaringEnabled" not in text and "coreLibraryDesugaringEnabled" not in text:
+              if is_kts:
+                  text, count = re.subn(
+                      r'(compileOptions\s*\{)',
+                      r'\1\n        isCoreLibraryDesugaringEnabled = true',
+                      text, count=1)
+              else:
+                  text, count = re.subn(
+                      r'(compileOptions\s*\{)',
+                      r'\1\n        coreLibraryDesugaringEnabled true',
+                      text, count=1)
+              if count != 1:
+                  raise SystemExit("Bloc compileOptions introuvable dans Gradle")
+
+          if "desugar_jdk_libs" not in text:
+              if is_kts:
+                  text, count = re.subn(
+                      r'(dependencies\s*\{)',
+                      r'\1\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                      text, count=1)
+              else:
+                  text, count = re.subn(
+                      r'(dependencies\s*\{)',
+                      r"\1\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'",
+                      text, count=1)
+              if count != 1:
+                  raise SystemExit("Bloc dependencies introuvable dans Gradle")
+
+          gradle.write_text(text)
+          print("Configuration des notifications Android ajoutée.")
+          PY
+
+      - name: Set application name
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("app/android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          s, n = re.subn(
+              r'android:label="[^"]*"',
+              'android:label="ToDo4ToDay"',
+              s,
+              count=1
+          )
+          if n != 1:
+              raise SystemExit("Application name not found")
+          p.write_text(s)
+          PY
+
+      - name: Install dependencies and generate launcher icon
+        working-directory: app
+        run: |
+          flutter pub get
+          dart run flutter_launcher_icons
+
+      - name: Build APK
+        working-directory: app
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: |
+          cp app/build/app/outputs/flutter-apk/app-release.apk \
+             app/build/app/outputs/flutter-apk/ToDo4ToDay.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToDo4ToDay-APK
+          path: app/build/app/outputs/flutter-apk/ToDo4ToDay.apk
