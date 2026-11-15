@@ -1,3 +1,4 @@
+
 name: Build ToDo4ToDay APK
 
 on:
@@ -56,11 +57,16 @@ jobs:
               "android.permission.POST_NOTIFICATIONS",
               "android.permission.SCHEDULE_EXACT_ALARM",
           ]
+
           for permission in permissions:
               entry = f'<uses-permission android:name="{permission}"/>'
               if permission not in xml:
-                  xml = re.sub(r'(<manifest\b[^>]*>)',
-                               r'\1\n    ' + entry, xml, count=1)
+                  xml = re.sub(
+                      r'(<manifest\b[^>]*>)',
+                      r'\1\n    ' + entry,
+                      xml,
+                      count=1
+                  )
 
           receivers = '''
               <receiver
@@ -77,45 +83,77 @@ jobs:
                   </intent-filter>
               </receiver>
           '''
+
           if "ScheduledNotificationReceiver" not in xml:
-              xml = xml.replace("</application>", receivers + "\n</application>")
+              xml = xml.replace(
+                  "</application>",
+                  receivers + "\n</application>"
+              )
+
           manifest.write_text(xml)
 
           gradle = Path("app/android/app/build.gradle.kts")
           is_kts = gradle.exists()
+
           if not is_kts:
               gradle = Path("app/android/app/build.gradle")
+
           if not gradle.exists():
               raise SystemExit("Fichier Gradle Android introuvable")
 
           text = gradle.read_text()
-          if "isCoreLibraryDesugaringEnabled" not in text and "coreLibraryDesugaringEnabled" not in text:
+
+          if (
+              "isCoreLibraryDesugaringEnabled" not in text
+              and "coreLibraryDesugaringEnabled" not in text
+          ):
               if is_kts:
                   text, count = re.subn(
                       r'(compileOptions\s*\{)',
                       r'\1\n        isCoreLibraryDesugaringEnabled = true',
-                      text, count=1)
+                      text,
+                      count=1
+                  )
               else:
                   text, count = re.subn(
                       r'(compileOptions\s*\{)',
                       r'\1\n        coreLibraryDesugaringEnabled true',
-                      text, count=1)
+                      text,
+                      count=1
+                  )
+
               if count != 1:
                   raise SystemExit("Bloc compileOptions introuvable dans Gradle")
 
           if "desugar_jdk_libs" not in text:
               if is_kts:
-                  text, count = re.subn(
-                      r'(dependencies\s*\{)',
-                      r'\1\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
-                      text, count=1)
+                  dependency_line = (
+                      '    coreLibraryDesugaring('
+                      '"com.android.tools:desugar_jdk_libs:2.1.4")'
+                  )
               else:
-                  text, count = re.subn(
-                      r'(dependencies\s*\{)',
-                      r"\1\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'",
-                      text, count=1)
-              if count != 1:
-                  raise SystemExit("Bloc dependencies introuvable dans Gradle")
+                  dependency_line = (
+                      "    coreLibraryDesugaring "
+                      "'com.android.tools:desugar_jdk_libs:2.1.4'"
+                  )
+
+              match = re.search(r'dependencies\s*\{', text)
+
+              if match:
+                  insert_at = match.end()
+                  text = (
+                      text[:insert_at]
+                      + "\n"
+                      + dependency_line
+                      + text[insert_at:]
+                  )
+              else:
+                  text = (
+                      text.rstrip()
+                      + "\n\ndependencies {\n"
+                      + dependency_line
+                      + "\n}\n"
+                  )
 
           gradle.write_text(text)
           print("Configuration des notifications Android ajoutée.")
@@ -129,14 +167,17 @@ jobs:
 
           p = Path("app/android/app/src/main/AndroidManifest.xml")
           s = p.read_text()
+
           s, n = re.subn(
               r'android:label="[^"]*"',
               'android:label="ToDo4ToDay"',
               s,
               count=1
           )
+
           if n != 1:
               raise SystemExit("Application name not found")
+
           p.write_text(s)
           PY
 
