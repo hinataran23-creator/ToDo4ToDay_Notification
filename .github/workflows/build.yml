@@ -90,6 +90,18 @@ jobs:
                   receivers + "\n</application>"
               )
 
+          action_receiver = '''
+              <receiver
+                  android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+                  android:exported="false" />
+          '''
+
+          if "ActionBroadcastReceiver" not in xml:
+              xml = xml.replace(
+                  "</application>",
+                  action_receiver + "\n</application>"
+              )
+
           manifest.write_text(xml)
 
           gradle = Path("app/android/app/build.gradle.kts")
@@ -156,7 +168,8 @@ jobs:
                   )
 
           gradle.write_text(text)
-          print("Configuration des notifications Android ajoutée.")
+
+          print("Configuration Android des notifications terminée.")
           PY
 
       - name: Set application name
